@@ -53,7 +53,7 @@ import {
   GithubRateLimitedError
 } from './distribution';
 import * as helpers from './helpers';
-import { assertNever } from './pure/helpers-pure';
+import { assertNever, getErrorMessage } from './pure/helpers-pure';
 import { spawnIdeServer } from './ide-server';
 import { InterfaceManager } from './interface';
 import { WebviewReveal } from './interface-utils';
@@ -466,7 +466,7 @@ async function activateWithInstalledDistribution(
     try {
       await cmpm.showResults(from, to);
     } catch (e) {
-      void helpers.showAndLogErrorMessage(e.message);
+      void helpers.showAndLogErrorMessage(getErrorMessage(e));
     }
   }
 
@@ -526,11 +526,11 @@ async function activateWithInstalledDistribution(
       try {
         await cliServer.generateQueryHelp(pathToQhelp, absolutePathToMd);
         await commands.executeCommand('markdown.showPreviewToSide', uri);
-      } catch (err) {
-        const errorMessage = err.message.includes('Generating qhelp in markdown') ? (
+      } catch (e) {
+        const errorMessage = getErrorMessage(e).includes('Generating qhelp in markdown') ? (
           `Could not generate markdown from ${pathToQhelp}: Bad formatting in .qhelp file.`
         ) : `Could not open a preview of the generated file (${absolutePathToMd}).`;
-        void helpers.showAndLogErrorMessage(errorMessage, { fullMessage: `${errorMessage}\n${err}` });
+        void helpers.showAndLogErrorMessage(errorMessage, { fullMessage: `${errorMessage}\n${e}` });
       }
     }
 
@@ -650,9 +650,9 @@ async function activateWithInstalledDistribution(
           for (const item of quickpick) {
             try {
               await compileAndRunQuery(false, uri, progress, token, item.databaseItem);
-            } catch (error) {
+            } catch (e) {
               skippedDatabases.push(item.label);
-              errors.push(error.message);
+              errors.push(getErrorMessage(e));
             }
           }
           if (skippedDatabases.length > 0) {
@@ -1017,7 +1017,7 @@ const checkForUpdatesCommand = 'codeQL.checkForUpdatesToCLI';
 
 /**
  * This text provider lets us open readonly files in the editor.
- * 
+ *
  * TODO: Consolidate this with the 'codeql' text provider in query-history.ts.
  */
 function registerRemoteQueryTextProvider() {

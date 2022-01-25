@@ -29,3 +29,11 @@ export const asyncFilter = async function <T>(arr: T[], predicate: (arg0: T) => 
   const results = await Promise.all(arr.map(predicate));
   return arr.filter((_, index) => results[index]);
 };
+
+export function getErrorMessage(e: any) {
+  return e instanceof Error ? e.message : String(e);
+}
+
+export function getErrorStack(e: any) {
+  return e instanceof Error ? e.stack ?? '' : '';
+}

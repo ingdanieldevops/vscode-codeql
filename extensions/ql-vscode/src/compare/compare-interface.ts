@@ -21,6 +21,7 @@ import { DatabaseManager } from '../databases';
 import { getHtmlForWebview, jumpToLocation } from '../interface-utils';
 import { transformBqrsResultSet, RawResultSet, BQRSInfo } from '../pure/bqrs-cli-types';
 import resultsDiff from './resultsDiff';
+import { getErrorMessage } from '../pure/helpers-pure';
 
 interface ComparePair {
   from: CompletedQuery;
@@ -70,7 +71,7 @@ export class CompareInterfaceManager extends DisposableObject {
       try {
         rows = this.compareResults(fromResultSet, toResultSet);
       } catch (e) {
-        message = e.message;
+        message = getErrorMessage(e);
       }
 
       await this.postMessage({

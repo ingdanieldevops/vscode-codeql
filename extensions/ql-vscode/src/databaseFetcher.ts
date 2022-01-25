@@ -21,6 +21,7 @@ import {
 } from './commandRunner';
 import { logger } from './logging';
 import { tmpDir } from './run-queries';
+import { getErrorMessage } from './pure/helpers-pure';
 
 /**
  * Prompts a user to fetch a database from a remote location. Database is assumed to be an archive file.
@@ -152,7 +153,7 @@ export async function importArchiveDatabase(
     }
     return item;
   } catch (e) {
-    if (e.message.includes('unexpected end of file')) {
+    if (getErrorMessage(e).includes('unexpected end of file')) {
       throw new Error('Database is corrupt or too large. Try unzipping outside of VS Code and importing the unzipped folder instead.');
     } else {
       // delegate
@@ -434,7 +435,7 @@ function convertRawLgtmSlug(maybeSlug: string): string | undefined {
   }
   return;
 }
- 
+
 function extractProjectSlug(lgtmUrl: string): string | undefined {
   // Only matches the '/g/' provider (github)
   const re = new RegExp('https://lgtm.com/projects/g/(.*[^/])');
@@ -479,7 +480,7 @@ export async function convertToDatabaseUrl(
       language,
     ].join('/')}`;
   } catch (e) {
-    void logger.log(`Error: ${e.message}`);
+    void logger.log(`Error: ${getErrorMessage(e)}`);
     throw new Error(`Invalid LGTM URL: ${lgtmUrl}`);
   }
 }

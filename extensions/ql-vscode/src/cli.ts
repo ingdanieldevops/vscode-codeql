@@ -12,7 +12,7 @@ import { CancellationToken, Disposable, Uri } from 'vscode';
 import { BQRSInfo, DecodedBqrsChunk } from './pure/bqrs-cli-types';
 import { CliConfig } from './config';
 import { DistributionProvider, FindDistributionResultKind } from './distribution';
-import { assertNever } from './pure/helpers-pure';
+import { assertNever, getErrorMessage, getErrorStack } from './pure/helpers-pure';
 import { QueryMetadata, SortDirection } from './pure/interface-types';
 import { Logger, ProgressReporter } from './logging';
 import { CompilationMessage } from './pure/messages';
@@ -345,7 +345,7 @@ export class CodeQLCliServer implements Disposable {
           stderrBuffers.length == 0
             ? new Error(`${description} failed: ${err}`)
             : new Error(`${description} failed: ${Buffer.concat(stderrBuffers).toString('utf8')}`);
-        newError.stack += (err.stack || '');
+        newError.stack += getErrorStack(err);
         throw newError;
       } finally {
         void this.logger.log(Buffer.concat(stderrBuffers).toString('utf8'));
@@ -447,7 +447,7 @@ export class CodeQLCliServer implements Disposable {
       try {
         yield JSON.parse(event) as EventType;
       } catch (err) {
-        throw new Error(`Parsing output of ${description} failed: ${err.stderr || err}`);
+        throw new Error(`Parsing output of ${description} failed: ${(err as any).stderr || getErrorMessage(err)}`);
       }
     }
   }
@@ -502,7 +502,7 @@ export class CodeQLCliServer implements Disposable {
     try {
       return JSON.parse(result) as OutputType;
     } catch (err) {
-      throw new Error(`Parsing output of ${description} failed: ${err.stderr || err}`);
+      throw new Error(`Parsing output of ${description} failed: ${(err as any).stderr || getErrorMessage(err)}`);
     }
   }
 
@@ -1004,7 +1004,7 @@ export async function runCodeQlCliCommand(
     void logger.log('CLI command succeeded.');
     return result.stdout;
   } catch (err) {
-    throw new Error(`${description} failed: ${err.stderr || err}`);
+    throw new Error(`${description} failed: ${(err as any).stderr || getErrorMessage(err)}`);
   }
 }
 

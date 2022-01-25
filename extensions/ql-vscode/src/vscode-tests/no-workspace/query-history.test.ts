@@ -8,6 +8,7 @@ import { logger } from '../../logging';
 import { QueryHistoryManager, HistoryTreeDataProvider } from '../../query-history';
 import { CompletedQuery } from '../../query-results';
 import { QueryInfo } from '../../run-queries';
+import { getErrorMessage } from '../../pure/helpers-pure';
 
 chai.use(chaiAsPromised);
 const expect = chai.expect;
@@ -140,7 +141,7 @@ describe('query-history', () => {
         await queryHistory.findOtherQueryToCompare(thisQuery, [thisQuery, allHistory[0]]);
         assert(false, 'Should have thrown');
       } catch (e) {
-        expect(e.message).to.eq('Please select a successful query.');
+        expect(getErrorMessage(e)).to.eq('Please select a successful query.');
       }
     });
 
@@ -153,7 +154,7 @@ describe('query-history', () => {
         await queryHistory.findOtherQueryToCompare(thisQuery, [thisQuery, allHistory[0]]);
         assert(false, 'Should have thrown');
       } catch (e) {
-        expect(e.message).to.eq('Query databases must be the same.');
+        expect(getErrorMessage(e)).to.eq('Query databases must be the same.');
       }
     });
 
@@ -165,7 +166,7 @@ describe('query-history', () => {
         await queryHistory.findOtherQueryToCompare(thisQuery, [thisQuery, allHistory[0], allHistory[1]]);
         assert(false, 'Should have thrown');
       } catch (e) {
-        expect(e.message).to.eq('Please select no more than 2 queries.');
+        expect(getErrorMessage(e)).to.eq('Please select no more than 2 queries.');
       }
     });
   });
