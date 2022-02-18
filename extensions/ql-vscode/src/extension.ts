@@ -89,13 +89,13 @@ import { CodeQlStatusBarHandler } from './status-bar';
 
 import { Credentials } from './authentication';
 import { RemoteQueriesManager } from './remote-queries/remote-queries-manager';
-import { RemoteQuery } from './remote-queries/remote-query';
 import { RemoteQueryResult } from './remote-queries/remote-query-result';
 import { URLSearchParams } from 'url';
 import { RemoteQueriesInterfaceManager } from './remote-queries/remote-queries-interface';
 import * as sampleData from './remote-queries/sample-data';
 import { handleDownloadPacks, handleInstallPackDependencies } from './packaging';
 import { AnalysesResultsManager } from './remote-queries/analyses-results-manager';
+import { RemoteQueryHistoryItem } from './remote-queries/remote-query-history-item';
 
 /**
  * extension.ts
@@ -454,11 +454,15 @@ async function activateWithInstalledDistribution(
     queryStorageDir,
     ctx,
     queryHistoryConfigurationListener,
-    showResults,
     async (from: CompletedLocalQueryInfo, to: CompletedLocalQueryInfo) =>
       showResultsForComparison(from, to),
   );
-  await qhm.readQueryHistory();
+
+  qhm.onWillOpenQueryItem(async item => {
+    if (item.t === 'local' && item.completed) {
+      await showResultsForCompletedQuery(item as CompletedLocalQueryInfo, WebviewReveal.Forced);
+    }
+  });
 
   ctx.subscriptions.push(qhm);
   void logger.log('Initializing results panel interface.');
@@ -533,7 +537,6 @@ async function activateWithInstalledDistribution(
           source.token,
         );
         item.completeThisQuery(completedQueryInfo);
-        await qhm.writeQueryHistory();
         await showResultsForCompletedQuery(item as CompletedLocalQueryInfo, WebviewReveal.NotForced);
         // Note we must update the query history view after showing results as the
         // display and sorting might depend on the number of results
@@ -541,7 +544,7 @@ async function activateWithInstalledDistribution(
         item.failureReason = e.message;
         throw e;
       } finally {
-        qhm.refreshTreeView();
+        await qhm.refreshTreeView();
         source.dispose();
       }
     }
@@ -815,6 +818,12 @@ async function activateWithInstalledDistribution(
 
   void logger.log('Initializing remote queries interface.');
   const rqm = new RemoteQueriesManager(ctx, cliServer, qhm, queryStorageDir, logger);
+  ctx.subscriptions.push(rqm);
+
+  // wait until after the remote queries manager is initialized to read the query history
+  // since the rqm is notified of queries being added.
+  await qhm.readQueryHistory();
+
 
   registerRemoteQueryTextProvider();
 
@@ -847,9 +856,9 @@ async function activateWithInstalledDistribution(
 
   ctx.subscriptions.push(
     commandRunner('codeQL.monitorRemoteQuery', async (
-      query: RemoteQuery,
+      queryItem: RemoteQueryHistoryItem,
       token: CancellationToken) => {
-      await rqm.monitorRemoteQuery(query, token);
+      await rqm.monitorRemoteQuery(queryItem, token);
     }));
 
   ctx.subscriptions.push(

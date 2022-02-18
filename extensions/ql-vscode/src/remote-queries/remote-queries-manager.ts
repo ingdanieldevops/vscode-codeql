@@ -21,11 +21,12 @@ import { assertNever } from '../pure/helpers-pure';
 import { RemoteQueryHistoryItem } from './remote-query-history-item';
 import { QueryHistoryManager } from '../query-history';
 import { QueryStatus } from '../query-status';
+import { DisposableObject } from '../pure/disposable-object';
 
 const autoDownloadMaxSize = 300 * 1024;
 const autoDownloadMaxCount = 100;
 
-export class RemoteQueriesManager {
+export class RemoteQueriesManager extends DisposableObject {
   private readonly remoteQueriesMonitor: RemoteQueriesMonitor;
   private readonly analysesResultsManager: AnalysesResultsManager;
   private readonly interfaceManager: RemoteQueriesInterfaceManager;
@@ -37,9 +38,37 @@ export class RemoteQueriesManager {
     private readonly storagePath: string,
     logger: Logger,
   ) {
+    super();
     this.analysesResultsManager = new AnalysesResultsManager(ctx, storagePath, logger);
     this.interfaceManager = new RemoteQueriesInterfaceManager(ctx, logger, this.analysesResultsManager);
     this.remoteQueriesMonitor = new RemoteQueriesMonitor(ctx, logger);
+
+    this.push(
+      this.qhm.onDidAddQueryItem(async (queryItem) => {
+        if (queryItem?.t === 'remote') {
+          // first check if query exists on disk. If not, delete it from the history manager
+          if ((await this.queryHistoryItemExists(queryItem))) {
+            await commands.executeCommand('codeQL.monitorRemoteQuery', queryItem);
+          } else {
+            await this.qhm.handleRemoveHistoryItem(queryItem);
+          }
+        }
+      })
+    );
+
+    this.push(
+      this.qhm.onWillOpenQueryItem(async (queryItem) => {
+        // TODO!!!
+      })
+    );
+
+    this.push(
+      this.qhm.onDidRemoveQueryItem(async (queryItem) => {
+        if (queryItem?.t === 'remote') {
+          await this.removeStorageDirectory(queryItem);
+        }
+      })
+    );
   }
 
   public async runRemoteQuery(
@@ -56,57 +85,65 @@ export class RemoteQueriesManager {
       progress,
       token);
 
-    if (querySubmission && querySubmission.query) {
-      void commands.executeCommand('codeQL.monitorRemoteQuery', querySubmission.query);
+    if (querySubmission?.query) {
+      const query = querySubmission.query;
+      const queryId = this.createQueryId(query.queryName);
+
+      const queryHistoryItem: RemoteQueryHistoryItem = {
+        t: 'remote',
+        status: QueryStatus.InProgress,
+        completed: false,
+        queryId,
+        label: query.queryName,
+        remoteQuery: query,
+      };
+      await this.prepareStorageDirectory(queryHistoryItem);
+      await this.storeFile(queryHistoryItem, 'query.json', query);
+
+      this.qhm.addQuery(queryHistoryItem);
+      await this.qhm.refreshTreeView();
     }
   }
 
   public async monitorRemoteQuery(
-    query: RemoteQuery,
+    queryItem: RemoteQueryHistoryItem,
     cancellationToken: CancellationToken
   ): Promise<void> {
-    const queryId = this.createQueryId(query.queryName);
-    await this.prepareStorageDirectory(queryId);
-    await this.storeFile(queryId, 'query.json', query);
-
-    const queryHistoryItem = new RemoteQueryHistoryItem(query.queryName, queryId, this.storagePath);
-    this.qhm.addQuery(queryHistoryItem);
-
     const credentials = await Credentials.initialize(this.ctx);
 
-    const queryWorkflowResult = await this.remoteQueriesMonitor.monitorQuery(query, cancellationToken);
+    const queryWorkflowResult = await this.remoteQueriesMonitor.monitorQuery(queryItem.remoteQuery, cancellationToken);
 
     const executionEndTime = new Date();
 
     if (queryWorkflowResult.status === 'CompletedSuccessfully') {
-      const resultIndex = await getRemoteQueryIndex(credentials, query);
+      const resultIndex = await getRemoteQueryIndex(credentials, queryItem.remoteQuery);
       if (!resultIndex) {
-        void showAndLogErrorMessage(`There was an issue retrieving the result for the query ${query.queryName}`);
+        void showAndLogErrorMessage(`There was an issue retrieving the result for the query ${queryItem.label}`);
         return;
       }
-      queryHistoryItem.completed = true;
-      queryHistoryItem.status = QueryStatus.Completed;
-      const queryResult = this.mapQueryResult(executionEndTime, resultIndex, queryId);
+      queryItem.completed = true;
+      queryItem.status = QueryStatus.Completed;
+      const queryResult = this.mapQueryResult(executionEndTime, resultIndex, queryItem.queryId);
 
-      await this.storeFile(queryId, 'query-result.json', queryResult);
+      await this.storeFile(queryItem, 'query-result.json', queryResult);
 
       // Kick off auto-download of results in the background.
       void commands.executeCommand('codeQL.autoDownloadRemoteQueryResults', queryResult);
 
       // Ask if the user wants to open the results in the background.
-      void this.askToOpenResults(query, queryResult).then(
+      void this.askToOpenResults(queryItem.remoteQuery, queryResult).then(
         () => { /* do nothing */ },
         err => {
           void showAndLogErrorMessage(err);
         }
       );
     } else if (queryWorkflowResult.status === 'CompletedUnsuccessfully') {
-      queryHistoryItem.failureReason = queryWorkflowResult.error;
-      queryHistoryItem.status = QueryStatus.Failed;
+      queryItem.failureReason = queryWorkflowResult.error;
+      queryItem.status = QueryStatus.Failed;
       await showAndLogErrorMessage(`Remote query execution failed. Error: ${queryWorkflowResult.error}`);
     } else if (queryWorkflowResult.status === 'Cancelled') {
-      queryHistoryItem.failureReason = 'Cancelled';
-      queryHistoryItem.status = QueryStatus.Failed;
+      queryItem.failureReason = 'Cancelled';
+      queryItem.status = QueryStatus.Failed;
       await showAndLogErrorMessage('Remote query monitoring was cancelled');
     } else if (queryWorkflowResult.status === 'InProgress') {
       // Should not get here
@@ -115,7 +152,7 @@ export class RemoteQueriesManager {
       // Ensure all cases are covered
       assertNever(queryWorkflowResult.status);
     }
-    this.qhm.refreshTreeView();
+    await this.qhm.refreshTreeView();
   }
 
   public async autoDownloadRemoteQueryResults(
@@ -185,13 +222,22 @@ export class RemoteQueriesManager {
    *
    * @param queryName The name of the query that was run.
    */
-  private async prepareStorageDirectory(queryId: string): Promise<void> {
-    await createTimestampFile(path.join(this.storagePath, queryId));
+  private async prepareStorageDirectory(queryHistoryItem: RemoteQueryHistoryItem): Promise<void> {
+    await createTimestampFile(path.join(this.storagePath, queryHistoryItem.queryId));
   }
 
-  private async storeFile(queryId: string, fileName: string, obj: any): Promise<void> {
-    const filePath = path.join(this.storagePath, queryId, fileName);
+  private async storeFile(queryHistoryItem: RemoteQueryHistoryItem, fileName: string, obj: any): Promise<void> {
+    const filePath = path.join(this.storagePath, queryHistoryItem.queryId, fileName);
     await fs.writeFile(filePath, JSON.stringify(obj, null, 2), 'utf8');
   }
 
+  private async removeStorageDirectory(queryItem: RemoteQueryHistoryItem): Promise<void> {
+    const filePath = path.join(this.storagePath, queryItem.queryId);
+    await fs.remove(filePath);
+  }
+
+  private async queryHistoryItemExists(queryItem: RemoteQueryHistoryItem): Promise<boolean> {
+    const filePath = path.join(this.storagePath, queryItem.queryId);
+    return await fs.pathExists(filePath);
+  }
 }
